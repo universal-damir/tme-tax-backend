@@ -11,19 +11,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
+
+const app = express();
+
 const corsOptions = {
   origin: [
     'https://taxgpt.netlify.app',
     'http://localhost:3000',
-    'http://localhost:3001'
+    'http://localhost:3001',
+    'http://localhost:5173'  // Added for Vite
   ],
   credentials: true
 };
 
 app.use(cors(corsOptions));
-
-const app = express();
-app.use(cors());
 app.use(express.json());
 
 const openai = new OpenAI({
@@ -35,6 +36,11 @@ const pinecone = new Pinecone({
 });
 
 const index = pinecone.index(process.env.PINECONE_INDEX);
+
+// Add health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 const SYSTEM_PROMPT = `You are an expert UAE Tax Consultant Assistant with deep knowledge of UAE tax laws, regulations, and practices. 
 Your responses should be well-formatted and easy to read, using appropriate markdown formatting:
@@ -51,16 +57,12 @@ Base your answers on the provided context and format them for clarity. Note, IF 
 app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
   
-  // Set headers for streaming
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive'
   });
-  
-  
 
-  // Helper function to send SSE data
   const sendSSE = (data) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
@@ -69,14 +71,12 @@ app.post('/api/chat', async (req, res) => {
     const { message, history = [] } = req.body;
     console.log('Processing message:', message);
 
-    // Get embeddings for the query
     const embedding = await openai.embeddings.create({
       model: "text-embedding-ada-002",
       input: message,
     });
     console.log('Generated embeddings');
 
-    // Search Pinecone
     const queryResponse = await index.query({
       vector: embedding.data[0].embedding,
       topK: 5,
@@ -84,7 +84,6 @@ app.post('/api/chat', async (req, res) => {
     });
     console.log('Retrieved context from Pinecone');
 
-    // Extract context and sources
     const context = queryResponse.matches
       .map(match => `Content: ${match.metadata.text}\nSource: ${match.metadata.source}`)
       .join('\n\n');
@@ -95,13 +94,11 @@ app.post('/api/chat', async (req, res) => {
         .filter(Boolean)
     )];
 
-    // Prepare conversation history
     const conversationHistory = history.map(msg => ({
       role: msg.sender === 'user' ? 'user' : 'assistant',
       content: msg.text
     }));
 
-    // Create streaming completion
     console.log('Creating OpenAI stream...');
     const stream = await openai.chat.completions.create({
       model: "gpt-4",
@@ -115,7 +112,6 @@ app.post('/api/chat', async (req, res) => {
       stream: true
     });
 
-    // Stream the response
     console.log('Starting to stream response...');
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content || '';
@@ -124,7 +120,6 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // Send end of stream
     sendSSE({ type: 'done' });
     res.end();
 
