@@ -127,6 +127,16 @@ app.post('/api/chat', async (req, res) => {
     res.end();
   }
 });
+const corsOptions = {
+  origin: [
+    'https://https://taxgpt.netlify.app/chat',
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
