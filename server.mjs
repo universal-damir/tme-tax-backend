@@ -11,6 +11,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
+const corsOptions = {
+  origin: [
+    'https://taxgpt.netlify.app',
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 const app = express();
 app.use(cors());
@@ -45,9 +55,10 @@ app.post('/api/chat', async (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
+    'Connection': 'keep-alive'
   });
+  
+  
 
   // Helper function to send SSE data
   const sendSSE = (data) => {
@@ -127,16 +138,6 @@ app.post('/api/chat', async (req, res) => {
     res.end();
   }
 });
-const corsOptions = {
-  origin: [
-    'https://https://taxgpt.netlify.app/chat',
-    'http://localhost:3000',
-    'http://localhost:3001'
-  ],
-  credentials: true
-};
-
-app.use(cors(corsOptions));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
