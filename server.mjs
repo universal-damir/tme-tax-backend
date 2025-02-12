@@ -19,7 +19,7 @@ const corsOptions = {
     'https://taxgpt.netlify.app',
     'http://localhost:3000',
     'http://localhost:3001',
-    'http://localhost:5173'  // Added for Vite
+    'http://localhost:5173'
   ],
   credentials: true
 };
@@ -52,7 +52,7 @@ Your responses should be well-formatted and easy to read, using appropriate mark
 - Include relevant examples in code blocks
 - Use tables when comparing multiple items
 
-Base your answers on the provided context and format them for clarity. Note, IF you encouter ESR Rules, do not mention or discuss thise, since they are abolished by law in 2024.`;
+Base your answers on the provided context and format them for clarity. When applicable quote the law you are referencing. Note, IF you encouter ESR Rules, do not mention or discuss thise, since they are abolished by law in 2024.`;
 
 app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
