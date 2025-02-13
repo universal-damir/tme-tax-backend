@@ -12,6 +12,13 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+console.log('Environment variables check:', {
+  hasPineconeKey: !!process.env.PINECONE_API_KEY,
+  hasPineconeIndex: !!process.env.PINECONE_INDEX,
+  pineconeIndex: process.env.PINECONE_INDEX,
+  hasOpenAIKey: !!process.env.OPENAI_API_KEY
+});
+
 const app = express();
 
 const allowedOrigins = ['https://taxgpt.netlify.app', 'http://localhost:3001'];
@@ -63,11 +70,26 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Initialize Pinecone with error handling
 const pinecone = new Pinecone({
   apiKey: process.env.PINECONE_API_KEY
 });
 
+// Validate environment variables
+if (!process.env.PINECONE_INDEX) {
+  throw new Error('PINECONE_INDEX environment variable is not set');
+}
+
 const index = pinecone.index(process.env.PINECONE_INDEX);
+
+// Add error handler for Pinecone operations
+const handlePineconeError = (error) => {
+  console.error('Pinecone error:', error);
+  if (error.message.includes('name')) {
+    throw new Error('Invalid Pinecone index configuration. Please check your PINECONE_INDEX environment variable.');
+  }
+  throw error;
+};
 
 // Add health check endpoint
 app.get('/api/health', (req, res) => {
