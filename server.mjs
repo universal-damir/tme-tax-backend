@@ -6,6 +6,7 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,7 +62,7 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// 5. Add a test route to verify CORS
+// Ttest route to verify CORS
 app.get('/api/test', (req, res) => {
   res.json({ message: 'CORS is working' });
 });
@@ -82,7 +83,7 @@ if (!process.env.PINECONE_INDEX) {
 
 const index = pinecone.index(process.env.PINECONE_INDEX);
 
-// Add error handler for Pinecone operations
+// Error handler for Pinecone operations
 const handlePineconeError = (error) => {
   console.error('Pinecone error:', error);
   if (error.message.includes('name')) {
@@ -91,7 +92,7 @@ const handlePineconeError = (error) => {
   throw error;
 };
 
-// Add health check endpoint
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   console.log('Health check received:', {
     headers: req.headers,
@@ -123,7 +124,7 @@ app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
   
  
-  // Set CORS headers explicitly in case they're lost
+  // CORS headers explicitly in case they're lost
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
@@ -213,7 +214,7 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// Add error handling middleware
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({
@@ -221,6 +222,35 @@ app.use((err, req, res, next) => {
       ? 'Internal server error' 
       : err.message
   });
+});
+
+const VALID_USERNAME = process.env.LOGIN_USERNAME || 'tmetaxation';
+const VALID_PASSWORD = process.env.LOGIN_PASSWORD || '100%TME-25';
+
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  
+
+  const isValidUsername = crypto.timingSafeEqual(
+    Buffer.from(username),
+    Buffer.from(VALID_USERNAME)
+  );
+  
+  const isValidPassword = crypto.timingSafeEqual(
+    Buffer.from(password),
+    Buffer.from(VALID_PASSWORD)
+  );
+
+  if (isValidUsername && isValidPassword) {
+    res.json({ success: true });
+  } else {
+  
+    res.status(401).json({ 
+      success: false, 
+      message: 'Invalid credentials' 
+    });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
