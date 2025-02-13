@@ -88,6 +88,9 @@ Base your answers on the provided context and format them for clarity. When appl
 app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
   
+  // Explicitly set CORS header (you can also use your corsOptions logic here)
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
