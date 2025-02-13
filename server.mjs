@@ -24,7 +24,12 @@ const corsOptions = {
 };
 
 // Enable pre-flight requests for all routes
-app.options('*', cors(corsOptions));
+app.options('/api/chat', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  return res.sendStatus(200);
+});
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
@@ -88,8 +93,10 @@ Base your answers on the provided context and format them for clarity. When appl
 app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
   
-  // Explicitly set CORS header (you can also use your corsOptions logic here)
+ 
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
   
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
