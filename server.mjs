@@ -14,21 +14,38 @@ dotenv.config();
 
 const app = express();
 
+// 1. Configure CORS before any routes
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN ? 
-    process.env.CORS_ORIGIN.split(',') : [
-    'https://taxgpt.netlify.app',
-    'http://localhost:3000',
-    'http://localhost:3001'
-  ],
+  origin: ['https://taxgpt.netlify.app'],  // Explicitly set the allowed origin
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  credentials: true,
-  maxAge: 86400 // 24 hours
+  optionsSuccessStatus: 200
 };
 
+// 2. Apply CORS middleware
 app.use(cors(corsOptions));
+
+// 3. Add preflight handling
+app.options('*', cors(corsOptions));
+
+// 4. Parse JSON bodies
 app.use(express.json());
+
+// 5. Add a test route to verify CORS
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'CORS is working' });
+});
+
+// Add this after your CORS configuration
+app.use((req, res, next) => {
+  console.log('Request:', {
+    method: req.method,
+    path: req.path,
+    origin: req.headers.origin,
+    headers: req.headers
+  });
+  next();
+});
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -135,6 +152,14 @@ app.post('/api/chat', async (req, res) => {
     });
     res.end();
   }
+});
+
+// Add this before your routes
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+  });
 });
 
 const PORT = process.env.PORT || 3000;
