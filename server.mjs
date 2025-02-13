@@ -14,34 +14,30 @@ dotenv.config();
 
 const app = express();
 
-// Enable pre-flight requests for all routes
-app.options('*', cors());
-
 const corsOptions = {
-  origin: 'https://taxgpt.netlify.app',
+  origin: process.env.NODE_ENV === 'development' 
+    ? 'http://localhost:3001'  // Frontend port
+    : 'https://taxgpt.netlify.app',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
+  exposedHeaders: ['Access-Control-Allow-Origin'],
   credentials: false,
   optionsSuccessStatus: 200
 };
 
+// Enable pre-flight requests for all routes
+app.options('*', cors(corsOptions));
+
 // Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Add headers middleware
+// Add logging to debug CORS issues
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'https://taxgpt.netlify.app');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin');
-  res.header('Access-Control-Allow-Credentials', 'false');
-  
-  // Handle OPTIONS method
-  if (req.method === 'OPTIONS') {
-    return res.status(200).json({
-      body: "OK"
-    });
-  }
-  
+  console.log('Incoming request:', {
+    method: req.method,
+    origin: req.headers.origin,
+    path: req.path
+  });
   next();
 });
 
@@ -51,17 +47,6 @@ app.use(express.json());
 // 5. Add a test route to verify CORS
 app.get('/api/test', (req, res) => {
   res.json({ message: 'CORS is working' });
-});
-
-// Add this after your CORS configuration
-app.use((req, res, next) => {
-  console.log('Request:', {
-    method: req.method,
-    path: req.path,
-    origin: req.headers.origin,
-    headers: req.headers
-  });
-  next();
 });
 
 const openai = new OpenAI({
@@ -171,11 +156,13 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// Add this before your routes
+// Add error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message
   });
 });
 
