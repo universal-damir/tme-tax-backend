@@ -174,11 +174,19 @@ app.post('/api/chat', async (req, res) => {
 
   } catch (error) {
     console.error('Error processing chat request:', error);
-    sendSSE({ 
-      type: 'error', 
-      error: 'Internal server error',
-      message: process.env.NODE_ENV === 'development' ? error.message : undefined 
-    });
+    
+    // Determine the error type and send appropriate message
+    const errorMessage = {
+      type: 'error',
+      error: error.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? {
+        name: error.name,
+        stack: error.stack,
+        cause: error.cause
+      } : undefined
+    };
+    
+    sendSSE(errorMessage);
     res.end();
   }
 });
