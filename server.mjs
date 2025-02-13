@@ -14,27 +14,35 @@ dotenv.config();
 
 const app = express();
 
+const allowedOrigins = ['https://taxgpt.netlify.app', 'http://localhost:3001'];
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'development' 
-    ? 'http://localhost:3001'
-    : ['https://taxgpt.netlify.app', 'https://tme-tax-backend-production.up.railway.app'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  credentials: false,
 };
 
-// Enable pre-flight requests for all routes
+app.use(cors(corsOptions));
+
+// Explicitly handle OPTIONS requests for /api/chat
 app.options('/api/chat', (req, res) => {
+  console.log('Received OPTIONS request for /api/chat');
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
   return res.sendStatus(200);
 });
 
-// Apply CORS middleware
-app.use(cors(corsOptions));
+// Basic route to confirm server is running
+app.get('/', (req, res) => res.send('Server is live'));
 
-// Add logging to debug CORS issues
+// Logging middleware for debugging
 app.use((req, res, next) => {
   console.log('Incoming request:', {
     method: req.method,
@@ -44,7 +52,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// 4. Parse JSON bodies
 app.use(express.json());
 
 // 5. Add a test route to verify CORS
@@ -94,6 +101,7 @@ app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
   
  
+  // Set CORS headers explicitly in case they're lost
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
