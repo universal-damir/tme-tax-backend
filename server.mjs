@@ -16,13 +16,11 @@ const app = express();
 
 const corsOptions = {
   origin: process.env.NODE_ENV === 'development' 
-    ? 'http://localhost:3001'  // Frontend port
-    : 'https://taxgpt.netlify.app',
+    ? 'http://localhost:3001'
+    : ['https://taxgpt.netlify.app', 'https://tme-tax-backend-production.up.railway.app'],
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
-  exposedHeaders: ['Access-Control-Allow-Origin'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: false,
-  optionsSuccessStatus: 200
 };
 
 // Enable pre-flight requests for all routes
@@ -61,7 +59,18 @@ const index = pinecone.index(process.env.PINECONE_INDEX);
 
 // Add health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+  console.log('Health check received:', {
+    headers: req.headers,
+    origin: req.get('origin')
+  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
 });
 
 const SYSTEM_PROMPT = `You are an expert UAE Tax Consultant Assistant with deep knowledge of UAE tax laws, regulations, and practices. 
