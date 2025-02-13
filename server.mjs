@@ -15,14 +15,14 @@ dotenv.config();
 const app = express();
 
 const corsOptions = {
-  origin: [
+  origin: process.env.CORS_ORIGIN ? 
+    process.env.CORS_ORIGIN.split(',') : [
     'https://taxgpt.netlify.app',
     'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:5173'
+    'http://localhost:3001'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   credentials: true,
   maxAge: 86400 // 24 hours
 };
