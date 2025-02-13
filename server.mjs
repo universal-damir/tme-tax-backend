@@ -21,7 +21,10 @@ const corsOptions = {
     'http://localhost:3001',
     'http://localhost:5173'
   ],
-  credentials: true
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  maxAge: 86400 // 24 hours
 };
 
 app.use(cors(corsOptions));
