@@ -14,19 +14,36 @@ dotenv.config();
 
 const app = express();
 
-// 1. Configure CORS before any routes
+// Enable pre-flight requests for all routes
+app.options('*', cors());
+
 const corsOptions = {
-  origin: ['https://taxgpt.netlify.app'],  // Explicitly set the allowed origin
+  origin: 'https://taxgpt.netlify.app',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
+  credentials: false,
   optionsSuccessStatus: 200
 };
 
-// 2. Apply CORS middleware
+// Apply CORS middleware
 app.use(cors(corsOptions));
 
-// 3. Add preflight handling
-app.options('*', cors(corsOptions));
+// Add headers middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://taxgpt.netlify.app');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin');
+  res.header('Access-Control-Allow-Credentials', 'false');
+  
+  // Handle OPTIONS method
+  if (req.method === 'OPTIONS') {
+    return res.status(200).json({
+      body: "OK"
+    });
+  }
+  
+  next();
+});
 
 // 4. Parse JSON bodies
 app.use(express.json());
