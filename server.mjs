@@ -22,7 +22,7 @@ console.log('Environment variables check:', {
 
 const app = express();
 
-const allowedOrigins = ['https://taxgpt.netlify.app', 'http://localhost:3001'];
+const allowedOrigins = ['https://taxgpt.netlify.app', 'http://localhost:3001', 'https://heroic-bombolone-ae44f2.netlify.app'];
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (like curl)
