@@ -7,44 +7,104 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import {
+  initDb,
+  createConversation,
+  addMessage,
+  getConversations,
+  getConversationMessages,
+  updateConversationTimestamp,
+  deleteConversation
+} from './db.mjs';
+import bcrypt from 'bcrypt';
+import pkg from 'pg';
+const { Pool } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config();
+console.log('Current directory:', process.cwd());
+console.log('__dirname:', __dirname);
 
-console.log('Environment variables check:', {
-  hasPineconeKey: !!process.env.PINECONE_API_KEY,
-  hasPineconeIndex: !!process.env.PINECONE_INDEX,
-  pineconeIndex: process.env.PINECONE_INDEX,
-  hasOpenAIKey: !!process.env.OPENAI_API_KEY
+// Load environment variables
+const envPath = path.resolve(process.cwd(), '.env');
+console.log('Loading .env from:', envPath);
+const result = dotenv.config({ path: envPath, debug: true });
+
+if (result.error) {
+  console.error('Error loading .env file:', result.error);
+  process.exit(1);
+}
+
+console.log('Loaded environment variables:', {
+  PGUSER: process.env.PGUSER,
+  PGHOST: process.env.PGHOST,
+  PGDATABASE: process.env.PGDATABASE,
+  PGPORT: process.env.PGPORT,
+  // Not logging password
 });
 
 const app = express();
 
-const allowedOrigins = ['https://taxgpt.netlify.app', 'http://localhost:3001'];
+// Security middleware
+app.use(helmet());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+
+app.use('/api/', limiter);
+
+// Strict CORS configuration
+const allowedOrigins = [
+  'https://taxgpt.netlify.app',
+  'http://localhost:3000',
+  'http://localhost:4000'
+];
+
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like curl)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
       return callback(null, true);
     }
-    return callback(new Error('Not allowed by CORS'));
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('Blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS', 'PUT', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  credentials: true,
+  maxAge: 86400, // 24 hours
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Explicitly handle OPTIONS requests for /api/chat
-app.options('/api/chat', (req, res) => {
-  console.log('Received OPTIONS request for /api/chat');
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-  return res.sendStatus(200);
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+// Sanitize request data
+app.use(express.json({ limit: '10kb' })); // Limit JSON payload size
+
+// Security headers middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
 });
 
 // Basic route to confirm server is running
@@ -59,8 +119,6 @@ app.use((req, res, next) => {
   });
   next();
 });
-
-app.use(express.json());
 
 // Ttest route to verify CORS
 app.get('/api/test', (req, res) => {
@@ -120,6 +178,61 @@ Your responses should be well-formatted and easy to read, using appropriate mark
 
 Base your answers on the provided context and format them for clarity. When applicable quote the law you are referencing. Note, IF you encouter ESR Rules, do not mention or discuss thise, since they are abolished by law in 2024.`;
 
+// Initialize database
+initDb().catch(console.error);
+
+// New endpoints for conversation management
+app.get('/api/conversations', async (req, res) => {
+  try {
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+    }
+    console.log('Fetching conversations for user:', userId);
+    const conversations = await getConversations(userId);
+    res.json(conversations);
+  } catch (error) {
+    console.error('Error fetching conversations:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/conversations/:id', async (req, res) => {
+  try {
+    const messages = await getConversationMessages(req.params.id);
+    res.json(messages);
+  } catch (error) {
+    console.error('Error fetching conversation messages:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/conversations', async (req, res) => {
+  try {
+    const { title } = req.body;
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const conversation = await createConversation(userId, title || 'New Conversation');
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error creating conversation:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/conversations/:id', async (req, res) => {
+  try {
+    await deleteConversation(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update the existing chat endpoint to work with conversations
 app.post('/api/chat', async (req, res) => {
   console.log('Received chat request');
   
@@ -140,8 +253,24 @@ app.post('/api/chat', async (req, res) => {
   };
 
   try {
-    const { message, history = [] } = req.body;
-    console.log('Processing message:', message);
+    const { message, conversationId, history = [] } = req.body;
+    const userId = req.headers.authorization;
+    
+    if (!userId) {
+      sendSSE({ type: 'error', error: 'Unauthorized' });
+      return res.end();
+    }
+
+    let currentConversationId = conversationId;
+    if (!currentConversationId) {
+      // Create a new conversation if none exists
+      const conversation = await createConversation(userId, message.slice(0, 50) + '...');
+      currentConversationId = conversation.id;
+      sendSSE({ type: 'conversation', id: currentConversationId });
+    }
+
+    // Save user message
+    await addMessage(currentConversationId, 'user', message);
 
     const embedding = await openai.embeddings.create({
       model: "text-embedding-ada-002",
@@ -185,38 +314,70 @@ app.post('/api/chat', async (req, res) => {
     });
 
     console.log('Starting to stream response...');
+    let assistantMessage = '';
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content || '';
       if (content) {
+        assistantMessage += content;
         sendSSE({ type: 'content', content });
       }
     }
+
+    // Save assistant message
+    await addMessage(currentConversationId, 'assistant', assistantMessage);
+    await updateConversationTimestamp(currentConversationId);
 
     sendSSE({ type: 'done' });
     res.end();
 
   } catch (error) {
     console.error('Error processing chat request:', error);
-    
-    // Determine the error type and send appropriate message
-    const errorMessage = {
+    sendSSE({
       type: 'error',
-      error: error.message || 'Internal server error',
-      details: process.env.NODE_ENV === 'development' ? {
-        name: error.name,
-        stack: error.stack,
-        cause: error.cause
-      } : undefined
-    };
-    
-    sendSSE(errorMessage);
+      error: error.message || 'Internal server error'
+    });
     res.end();
   }
 });
 
-// Error handling middleware
+// Add CORS debugging middleware
+app.use((req, res, next) => {
+  console.log('Incoming request:', {
+    method: req.method,
+    path: req.path,
+    origin: req.headers.origin,
+    headers: req.headers
+  });
+  next();
+});
+
+// Handle preflight requests for all routes
+app.options('*', (req, res) => {
+  console.log('Handling preflight request:', {
+    origin: req.headers.origin,
+    method: req.method,
+    path: req.path
+  });
+  
+  // Set CORS headers
+  res.header('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
+  
+  // Respond with 204
+  res.sendStatus(204);
+});
+
+// Update error handling middleware to include CORS headers
 app.use((err, req, res, next) => {
   console.error('Error:', err);
+  
+  // Set CORS headers even for error responses
+  res.header('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
   res.status(500).json({
     error: process.env.NODE_ENV === 'production' 
       ? 'Internal server error' 
@@ -224,36 +385,67 @@ app.use((err, req, res, next) => {
   });
 });
 
-const VALID_USERNAME = process.env.LOGIN_USERNAME || 'tmetaxation';
-const VALID_PASSWORD = process.env.LOGIN_PASSWORD || '100%TME-25';
+// Generate a secure JWT secret if not provided in environment
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
 
+// Configure database pool
+const pool = new Pool({
+  user: process.env.PGUSER,
+  password: process.env.POSTGRES_PASSWORD,
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  database: process.env.PGDATABASE,
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: false
+  } : false
+});
 
-app.post('/api/login', (req, res) => {
+// Update login endpoint
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   
+  try {
+    // Query user from database
+    const result = await pool.query(
+      'SELECT id, username, password_hash FROM users WHERE username = $1',
+      [username]
+    );
 
-  const isValidUsername = crypto.timingSafeEqual(
-    Buffer.from(username),
-    Buffer.from(VALID_USERNAME)
-  );
-  
-  const isValidPassword = crypto.timingSafeEqual(
-    Buffer.from(password),
-    Buffer.from(VALID_PASSWORD)
-  );
+    const user = result.rows[0];
 
-  if (isValidUsername && isValidPassword) {
-    res.json({ success: true });
-  } else {
-  
-    res.status(401).json({ 
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials' 
+      });
+    }
+
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+
+    if (isValidPassword) {
+      res.json({ 
+        success: true,
+        userId: user.id.toString(),
+        username: user.username
+      });
+    } else {
+      res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials' 
+      });
+    }
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ 
       success: false, 
-      message: 'Invalid credentials' 
+      message: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = 4000;
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
