@@ -28,17 +28,19 @@ const __dirname = path.dirname(__filename);
 console.log('Current directory:', process.cwd());
 console.log('__dirname:', __dirname);
 
-// Load environment variables
-const envPath = path.resolve(process.cwd(), '.env');
-console.log('Loading .env from:', envPath);
-const result = dotenv.config({ path: envPath, debug: true });
-
-if (result.error) {
-  console.error('Error loading .env file:', result.error);
-  process.exit(1);
+// Load environment variables only in development
+if (process.env.NODE_ENV !== 'production') {
+  const envPath = path.resolve(process.cwd(), '.env');
+  console.log('Loading .env from:', envPath);
+  const result = dotenv.config({ path: envPath, debug: true });
+  if (result.error) {
+    console.warn('Error loading .env file in development:', result.error);
+  }
+} else {
+  console.log('Running in production mode, using environment variables');
 }
 
-console.log('Loaded environment variables:', {
+console.log('Environment variables loaded:', {
   PGUSER: process.env.PGUSER,
   PGHOST: process.env.PGHOST,
   PGDATABASE: process.env.PGDATABASE,
