@@ -425,8 +425,14 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-const PORT = 4000;
+// Configure port for different environments
+const PORT = process.env.PORT || 4000;
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Attempting to start server on port:', PORT);
 
+// Start server with proper host binding
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Full server URL: http://0.0.0.0:${PORT}`);
+  console.log('CORS allowed origins:', corsOptions.origin);
 });
