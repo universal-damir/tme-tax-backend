@@ -168,8 +168,12 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
 - **Example Blocks** for case studies or calculations
 
 ## **Engaging Follow-Ups**
-- When answering, anticipate possible follow-up questions and suggest additional relevant tax topics.
-- Example: If asked about VAT registration, also mention common compliance issues businesses face.
+- Instead of listing generic follow-up topics, **ask the user relevant questions** based on their query.
+- Example: Instead of "Possible Follow-Up Topics: Deductions and Exemptions," ask:  
+  - "Are you looking to explore potential deductions or exemptions that might reduce this tax?"  
+  - "Would you like to understand how corporate tax applies to free zone entities like yours?"  
+- Ensure follow-up questions feel **natural and conversational**, helping users **deepen their understanding**.
+- Offer to connect them with **TME Services** for a personalized consultation if needed.
 
 ## **Tone & Readability**
 - Maintain a professional yet approachable tone, avoiding overly technical or robotic language.
@@ -322,16 +326,17 @@ app.post('/api/chat', async (req, res) => {
 
     console.log('Creating OpenAI stream...');
     const stream = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4-turbo",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...conversationHistory,
         { role: "user", content: `Context:\n${context}\n\nQuestion: ${message}` }
       ],
-      temperature: 0.7,
+      temperature: 0.3, // Lower temperature for accuracy in legal/tax responses
       max_tokens: 1000,
       stream: true
     });
+    
 
     console.log('Starting to stream response...');
     let assistantMessage = '';
