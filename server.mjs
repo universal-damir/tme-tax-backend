@@ -180,10 +180,18 @@ app.get('/api/conversations', async (req, res) => {
 
 app.get('/api/conversations/:id', async (req, res) => {
   try {
-    const messages = await getConversationMessages(req.params.id);
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+    }
+
+    const messages = await getConversationMessages(req.params.id, userId);
     res.json(messages);
   } catch (error) {
     console.error('Error fetching conversation messages:', error);
+    if (error.message.includes('Unauthorized')) {
+      return res.status(403).json({ error: 'Unauthorized access to conversation' });
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -205,10 +213,18 @@ app.post('/api/conversations', async (req, res) => {
 
 app.delete('/api/conversations/:id', async (req, res) => {
   try {
-    await deleteConversation(req.params.id);
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+    }
+
+    await deleteConversation(req.params.id, userId);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting conversation:', error);
+    if (error.message.includes('Unauthorized')) {
+      return res.status(403).json({ error: 'Unauthorized access to conversation' });
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });

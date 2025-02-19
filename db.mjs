@@ -168,8 +168,18 @@ const getConversations = async (userId) => {
   }
 };
 
-const getConversationMessages = async (conversationId) => {
+const getConversationMessages = async (conversationId, userId) => {
   try {
+    // First verify the conversation belongs to the user
+    const conversationCheck = await pool.query(
+      'SELECT id FROM conversations WHERE id = $1 AND user_id = $2',
+      [conversationId, userId]
+    );
+    
+    if (conversationCheck.rows.length === 0) {
+      throw new Error('Unauthorized access to conversation');
+    }
+
     const result = await pool.query(
       'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
       [conversationId]
@@ -193,9 +203,19 @@ const updateConversationTimestamp = async (conversationId) => {
   }
 };
 
-const deleteConversation = async (conversationId) => {
+const deleteConversation = async (conversationId, userId) => {
   try {
-    await pool.query('DELETE FROM conversations WHERE id = $1', [conversationId]);
+    // First verify the conversation belongs to the user
+    const conversationCheck = await pool.query(
+      'SELECT id FROM conversations WHERE id = $1 AND user_id = $2',
+      [conversationId, userId]
+    );
+    
+    if (conversationCheck.rows.length === 0) {
+      throw new Error('Unauthorized access to conversation');
+    }
+
+    await pool.query('DELETE FROM conversations WHERE id = $1 AND user_id = $2', [conversationId, userId]);
   } catch (error) {
     logError('deleteConversation', error);
     throw new Error(`Failed to delete conversation: ${error.message}`);
