@@ -50,8 +50,23 @@ console.log('Environment variables loaded:', {
 
 const app = express();
 
+// CORS Configuration - Must be before other middleware
+const corsOptions = {
+  origin: ['https://taxgpt.netlify.app', 'http://localhost:3000', 'http://localhost:4000'],
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS', 'PUT', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  credentials: true,
+  maxAge: 86400
+};
+
+// Apply CORS middleware first
+app.use(cors(corsOptions));
+
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginOpenerPolicy: { policy: "unsafe-none" }
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -61,55 +76,6 @@ const limiter = rateLimit({
 });
 
 app.use('/api/', limiter);
-
-// Strict CORS configuration
-const allowedOrigins = [
-  'https://taxgpt.netlify.app',
-  'http://localhost:3000',
-  'http://localhost:4000'
-];
-
-const corsOptions = {
-  origin: function(origin, callback) {
-    console.log('Request origin:', origin);
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log('Blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS', 'PUT', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  credentials: true,
-  maxAge: 86400, // 24 hours
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-};
-
-// Apply CORS middleware before any routes
-app.use(cors(corsOptions));
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
-
-// Additional CORS headers middleware
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  next();
-});
 
 // Sanitize request data
 app.use(express.json({ limit: '10kb' })); // Limit JSON payload size
@@ -375,7 +341,7 @@ app.options('*', (req, res) => {
   });
   
   // Set CORS headers
-  res.header('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '');
+  res.header('Access-Control-Allow-Origin', corsOptions.origin.includes(req.headers.origin) ? req.headers.origin : '');
   res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -390,7 +356,7 @@ app.use((err, req, res, next) => {
   console.error('Error:', err);
   
   // Set CORS headers even for error responses
-  res.header('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '');
+  res.header('Access-Control-Allow-Origin', corsOptions.origin.includes(req.headers.origin) ? req.headers.origin : '');
   res.header('Access-Control-Allow-Credentials', 'true');
   
   res.status(500).json({
