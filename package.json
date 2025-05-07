@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "nodemon server.mjs",
-    "process": "node processDocuments.cjs"
+    "process": "node processDocuments.cjs",
+    "postinstall": "npm rebuild"
   },
   "dependencies": {
     "@google/generative-ai": "^0.1.3",
@@ -21,7 +22,7 @@
     "pg": "^8.13.3"
   },
   "engines": {
-    "node": "18.19.0",
-    "npm": "10.2.3"
+    "node": "18.20.5",
+    "npm": "10.8.2"
   }
 }
