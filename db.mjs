@@ -203,6 +203,49 @@ const updateConversationTimestamp = async (conversationId) => {
   }
 };
 
+const updateConversation = async (conversationId, userId, updates) => {
+  try {
+    // First verify the conversation belongs to the user
+    const conversationCheck = await pool.query(
+      'SELECT id FROM conversations WHERE id = $1 AND user_id = $2',
+      [conversationId, userId]
+    );
+    
+    if (conversationCheck.rows.length === 0) {
+      throw new Error('Unauthorized access to conversation');
+    }
+
+    // Build dynamic update query based on provided updates
+    const updateFields = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (updates.title !== undefined) {
+      updateFields.push(`title = $${paramIndex++}`);
+      values.push(updates.title);
+    }
+
+    if (updateFields.length === 0) {
+      throw new Error('No valid update fields provided');
+    }
+
+    // Always update the timestamp
+    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+    
+    // Add WHERE clause parameters
+    values.push(conversationId, userId);
+    const whereClause = `WHERE id = $${paramIndex++} AND user_id = $${paramIndex}`;
+
+    const query = `UPDATE conversations SET ${updateFields.join(', ')} ${whereClause} RETURNING *`;
+    
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  } catch (error) {
+    logError('updateConversation', error);
+    throw new Error(`Failed to update conversation: ${error.message}`);
+  }
+};
+
 const deleteConversation = async (conversationId, userId) => {
   try {
     // First verify the conversation belongs to the user
@@ -241,6 +284,7 @@ export {
   getConversations,
   getConversationMessages,
   updateConversationTimestamp,
+  updateConversation,
   deleteConversation,
   healthCheck
 }; 

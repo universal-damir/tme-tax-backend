@@ -9,6 +9,14 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
+import fs from 'fs';
+import {
+  processFile,
+  createDocumentEmbeddings,
+  searchDocumentChunks,
+  cleanupFile
+} from './fileProcessor.mjs';
 import {
   initDb,
   createConversation,
@@ -16,6 +24,7 @@ import {
   getConversations,
   getConversationMessages,
   updateConversationTimestamp,
+  updateConversation,
   deleteConversation
 } from './db.mjs';
 import bcrypt from 'bcrypt';
@@ -41,20 +50,20 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 console.log('Environment variables loaded:', {
-  PGUSER: process.env.PGUSER,
-  PGHOST: process.env.PGHOST,
-  PGDATABASE: process.env.PGDATABASE,
-  PGPORT: process.env.PGPORT,
-  // Not logging password
+  PGUSER: process.env.PGUSER ? '***' : 'not set',
+  PGHOST: process.env.PGHOST ? '***' : 'not set', 
+  PGDATABASE: process.env.PGDATABASE ? '***' : 'not set',
+  PGPORT: process.env.PGPORT ? '***' : 'not set',
+  // Never log passwords or API keys
 });
 
 const app = express();
 
 // CORS Configuration - Must be before other middleware
 const corsOptions = {
-  origin: ['https://taxgpt.netlify.app', 'http://localhost:3000', 'http://localhost:4000'],
+  origin: ['https://taxgpt.netlify.app', 'http://localhost:3000', 'http://localhost:3001', 'http://localhost:4000'],
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS', 'PUT', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Conversation-Id'],
   credentials: true,
   maxAge: 86400
 };
@@ -160,6 +169,28 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
 - Prioritize the most recent UAE tax regulations, clarifying if older laws have been amended or repealed.
 - If a query requires case-specific legal interpretation, recommend consulting **TME Services** for expert tax advice.
 
+## **Trial Balance Interpretation & Calculations**
+- If a **trial balance** is provided, identify relevant tax items such as:
+  - **Revenue**, **COGS**, **operating expenses**, **depreciation**, **provisions**, **related-party transactions**, etc.
+- Determine **adjusted taxable profit** according to UAE Corporate Tax law.
+- Apply **exemptions**, **thresholds**, or **non-deductible expenses** where applicable.
+- **Highlight any items that require clarification** (e.g., capital vs. revenue expenses, arm's length adjustments).
+- If information is ambiguous or missing, clearly state that and explain what is needed for a proper assessment.
+- Output tax calculations using a clean Markdown breakdown like this:
+
+### **Corporate Tax Calculation Based on Trial Balance**
+- **Net Profit Before Tax (from P&L):** AED XXXX
+- **Add Back Non-Deductible Expenses:**
+  - Entertainment: AED XXX
+  - Fines: AED XXX
+- **Less Allowable Deductions:**
+  - Depreciation: AED XXX
+- **Taxable Profit:** AED XXXX
+- **Exempt Threshold:** AED 375,000
+- **Taxable Amount:** AED XXXX - AED 375,000 = AED XXXX
+- **Tax Rate:** 9%
+- **CIT Due:** AED XXX
+
 ## **Formatting for Clarity**
 - **Headers (##)** for major sections
 - **Bullet points (-)** for structured lists
@@ -168,6 +199,7 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
 - **Example Blocks** for case studies or calculations
 - **Use proper Markdown code blocks for calculations, instead of LaTeX notation**
 - **Example of correct tax calculation formatting:**
+
 ## **Corporate Tax Calculation**
   - **Total Profit:** AED 750,000
   - **Exempted Threshold:** AED 375,000
@@ -181,18 +213,14 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
   - "Are you looking to explore potential deductions or exemptions that might reduce this tax?"  
   - "Would you like to understand how corporate tax applies to free zone entities like yours?"  
 - Ensure follow-up questions feel **natural and conversational**, helping users **deepen their understanding**.
-- Offer to connect them with **TME Services** for a personalized consultation if needed.
 
 ## **Tone & Readability**
 - Maintain a professional yet approachable tone, avoiding overly technical or robotic language.
 - Use clear, natural phrasing that a business owner or accountant would easily understand.
 
 ## **Disclaimers**
-- At the beginning of a conversation, state that responses are for informational purposes only and not legal advice.
-- Avoid repeating disclaimers unless the context changes significantly.
-- If case-specific guidance is needed, refer the user to **TME Services** for a tailored consultation.
-
-Stay professional, concise, and focused strictly on UAE tax topics.`;
+- There is NO NEED to disclaim any tax laws, regulations, or practices. Tax team will check your answers internally by default.
+`;
 
 // Initialize database
 initDb().catch(console.error);
@@ -246,6 +274,29 @@ app.post('/api/conversations', async (req, res) => {
   }
 });
 
+app.put('/api/conversations/:id', async (req, res) => {
+  try {
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+    }
+
+    const { title } = req.body;
+    if (!title || typeof title !== 'string' || title.trim().length === 0) {
+      return res.status(400).json({ error: 'Title is required and must be a non-empty string' });
+    }
+
+    const updatedConversation = await updateConversation(req.params.id, userId, { title: title.trim() });
+    res.json(updatedConversation);
+  } catch (error) {
+    console.error('Error updating conversation:', error);
+    if (error.message.includes('Unauthorized')) {
+      return res.status(403).json({ error: 'Unauthorized access to conversation' });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.delete('/api/conversations/:id', async (req, res) => {
   try {
     const userId = req.headers.authorization;
@@ -261,6 +312,109 @@ app.delete('/api/conversations/:id', async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized access to conversation' });
     }
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Configure multer for file uploads
+const upload = multer({
+  dest: 'uploads/',
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'application/pdf',
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    
+    const allowedExtensions = ['.pdf', '.csv', '.xlsx', '.xls'];
+    const fileExtension = path.extname(file.originalname).toLowerCase();
+    
+    if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only PDF, CSV, and Excel files are allowed.'), false);
+    }
+  }
+});
+
+// File upload endpoint
+app.post('/api/upload', upload.single('document'), async (req, res) => {
+  try {
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    console.log('Processing uploaded file:', req.file.originalname);
+    
+    // Process the file
+    const processedData = await processFile(req.file.path, req.file.originalname);
+    
+    // Create embeddings and store in Pinecone
+    const embeddingResult = await createDocumentEmbeddings(processedData, userId);
+    
+    // Clean up the temporary file
+    cleanupFile(req.file.path);
+    
+    res.json({
+      success: true,
+      document: {
+        fileName: processedData.originalName,
+        fileType: processedData.type,
+        fileSize: processedData.fileSize,
+        processedAt: processedData.processedAt,
+        chunksCreated: embeddingResult.chunksCreated,
+        metadata: processedData.metadata
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing file upload:', error);
+    
+    // Clean up file on error
+    if (req.file) {
+      cleanupFile(req.file.path);
+    }
+    
+    res.status(500).json({ 
+      error: error.message || 'Failed to process uploaded file' 
+    });
+  }
+});
+
+// Search user documents endpoint
+app.post('/api/search-documents', async (req, res) => {
+  try {
+    const userId = req.headers.authorization;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+    }
+
+    const { query, topK = 5 } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    const results = await searchDocumentChunks(query, userId, topK);
+    
+    res.json({
+      success: true,
+      results
+    });
+
+  } catch (error) {
+    console.error('Error searching documents:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to search documents' 
+    });
   }
 });
 
@@ -310,22 +464,38 @@ app.post('/api/chat', async (req, res) => {
     });
     console.log('Generated embeddings');
 
-    const queryResponse = await index.query({
-      vector: embedding.data[0].embedding,
-      topK: 5,
-      includeMetadata: true
-    });
-    console.log('Retrieved context from Pinecone');
+    // Search both general knowledge and user documents
+    const [generalQuery, userDocsQuery] = await Promise.all([
+      index.query({
+        vector: embedding.data[0].embedding,
+        topK: 3,
+        includeMetadata: true,
+        filter: {
+          conversationId: { $exists: false }  // Only get general knowledge, not user docs
+        }
+      }),
+      searchDocumentChunks(message, userId, 3)
+    ]);
 
-    const context = queryResponse.matches
-      .map(match => `Content: ${match.metadata.text}\nSource: ${match.metadata.source}`)
+    console.log('Retrieved context from Pinecone and user documents');
+
+    // Combine general knowledge and user document context
+    const generalContext = generalQuery.matches
+      .map(match => `Content: ${match.metadata?.text || 'No content available'}\nSource: ${match.metadata?.source || 'Unknown'}`)
       .join('\n\n');
 
-    const sources = [...new Set(
-      queryResponse.matches
-        .map(match => path.basename(match.metadata.source))
-        .filter(Boolean)
-    )];
+    const userDocContext = userDocsQuery
+      .map(match => `User Document (${match.fileName}): ${match.text}`)
+      .join('\n\n');
+
+    const combinedContext = [generalContext, userDocContext].filter(Boolean).join('\n\n--- User Documents ---\n\n');
+
+    const sources = [...new Set([
+      ...generalQuery.matches
+        .map(match => match.metadata?.source ? path.basename(match.metadata.source) : null)
+        .filter(Boolean),
+      ...userDocsQuery.map(match => match.fileName)
+    ])];
 
     const conversationHistory = history.map(msg => ({
       role: msg.sender === 'user' ? 'user' : 'assistant',
@@ -338,7 +508,7 @@ app.post('/api/chat', async (req, res) => {
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...conversationHistory,
-        { role: "user", content: `Context:\n${context}\n\nQuestion: ${message}` }
+        { role: "user", content: `Context:\n${combinedContext}\n\nQuestion: ${message}` }
       ],
       temperature: 0.3, // Lower temperature for accuracy in legal/tax responses
       max_tokens: 1000,
@@ -395,7 +565,7 @@ app.options('*', (req, res) => {
   // Set CORS headers
   res.header('Access-Control-Allow-Origin', corsOptions.origin.includes(req.headers.origin) ? req.headers.origin : '');
   res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-Conversation-Id');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400');
   
