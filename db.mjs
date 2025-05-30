@@ -45,7 +45,81 @@ const users = [
   { username: 'dijendra', password: '100%TME-25' }
 ];
 
-// Initialize database tables
+// Add safe database initialization function
+const initDbSafe = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Create users table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Check if users table is empty and insert default users
+    const userCount = await client.query('SELECT COUNT(*) FROM users');
+    if (parseInt(userCount.rows[0].count) === 0) {
+      // Insert users with hashed passwords only if table is empty
+      for (const user of users) {
+        const hashedPassword = await bcrypt.hash(user.password, saltRounds);
+        await client.query(
+          'INSERT INTO users (username, password_hash) VALUES ($1, $2)',
+          [user.username, hashedPassword]
+        );
+      }
+      console.log('Default users created');
+    }
+
+    // Create conversations table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    
+    // Create index if it doesn't exist
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+    `);
+
+    // Create messages table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        metadata JSONB
+      );
+    `);
+    
+    // Create index if it doesn't exist
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+    `);
+
+    await client.query('COMMIT');
+    console.log('Database tables created/verified successfully without data loss');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error in safe database initialization:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Original initDb function (for development/testing only - DROPS DATA!)
 const initDb = async () => {
   const client = await pool.connect();
   try {
@@ -103,7 +177,7 @@ const initDb = async () => {
     `);
 
     await client.query('COMMIT');
-    console.log('Database initialized successfully');
+    console.log('Database initialized successfully (DATA WAS DROPPED!)');
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error initializing database:', error);
@@ -278,6 +352,7 @@ const healthCheck = async () => {
 
 export {
   pool,
+  initDbSafe,
   initDb,
   createConversation,
   addMessage,

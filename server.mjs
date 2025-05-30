@@ -19,6 +19,7 @@ import {
 } from './fileProcessor.mjs';
 import {
   initDb,
+  initDbSafe,
   createConversation,
   addMessage,
   getConversations,
@@ -222,8 +223,53 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
 - There is NO NEED to disclaim any tax laws, regulations, or practices. Tax team will check your answers internally by default.
 `;
 
-// Initialize database
-initDb().catch(console.error);
+// Configure database pool
+const pool = new Pool({
+  user: process.env.PGUSER,
+  password: process.env.POSTGRES_PASSWORD,
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  database: process.env.PGDATABASE,
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: false
+  } : false
+});
+
+// Initialize database safely - only create tables if they don't exist
+const initializeDatabase = async () => {
+  try {
+    // Safety check: never allow destructive initialization in production
+    if (process.env.NODE_ENV === 'production' && process.env.FORCE_DB_RESET === 'true') {
+      console.error('CRITICAL WARNING: Attempted to reset database in production. This operation is blocked for safety.');
+      console.error('If you absolutely need to reset the database, set FORCE_DB_RESET=true in environment variables.');
+      console.error('This will result in PERMANENT DATA LOSS!');
+      return;
+    }
+    
+    // Check if the conversations table exists
+    const result = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_name = 'conversations'
+    `);
+    
+    if (result.rows.length === 0) {
+      console.log('Database tables not found, initializing for the first time...');
+      await initDbSafe();
+      console.log('Database initialization completed successfully');
+    } else {
+      console.log('Database already initialized, skipping table creation to preserve existing data');
+    }
+  } catch (error) {
+    console.error('Database initialization error:', error);
+    // In production, we don't want to crash the server if DB check fails
+    if (process.env.NODE_ENV !== 'production') {
+      throw error;
+    }
+  }
+};
+
+initializeDatabase();
 
 // New endpoints for conversation management
 app.get('/api/conversations', async (req, res) => {
@@ -590,18 +636,6 @@ app.use((err, req, res, next) => {
 
 // Generate a secure JWT secret if not provided in environment
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
-
-// Configure database pool
-const pool = new Pool({
-  user: process.env.PGUSER,
-  password: process.env.POSTGRES_PASSWORD,
-  host: process.env.PGHOST,
-  port: process.env.PGPORT,
-  database: process.env.PGDATABASE,
-  ssl: process.env.NODE_ENV === 'production' ? {
-    rejectUnauthorized: false
-  } : false
-});
 
 // Update login endpoint
 app.post('/api/login', async (req, res) => {
