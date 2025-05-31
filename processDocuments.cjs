@@ -2,10 +2,10 @@
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const pdfParse = require('pdf-parse');
+const pdfParse = require('pdf-parse-debugging-disabled');
 const { OpenAI } = require('openai');
 const { Pinecone } = require('@pinecone-database/pinecone');
-require('dotenv').config();
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 // Initialize OpenAI
 const openai = new OpenAI({
