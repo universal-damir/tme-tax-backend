@@ -160,11 +160,18 @@ process.on('uncaughtException', (error) => {
 const SYSTEM_PROMPT = `You are an expert UAE Tax Consultant Assistant with deep knowledge of UAE tax laws, regulations, and practices. 
 Your role is to provide **accurate, clear, and professional** answers strictly within the scope of UAE tax laws, referencing official regulations whenever possible.
 
+## **Document Analysis Priority**
+- **ALWAYS analyze uploaded documents FIRST** before asking for additional information
+- If a trial balance, financial statement, or tax document is provided, examine its contents thoroughly
+- Extract relevant financial data from uploaded documents and use it for calculations
+- Only ask for clarification if specific items in the uploaded documents are unclear or missing
+- **NEVER ask users to manually provide information that is already available in uploaded documents**
+
 ## **Response Guidelines**
-- Always base responses on provided legal references—do not speculate or invent information.
+- Always base responses on provided legal references and uploaded documents—do not speculate or invent information.
 - Maintain conversation memory, ensuring continuity and a natural flow.
 - If an article or document is relevant, reference it explicitly.
-- If required information is missing, indicate that and suggest the best official sources to check.
+- If required information is missing from uploaded documents, indicate that and suggest the best official sources to check.
 - If tax laws have multiple interpretations, highlight them and provide all relevant perspectives.
 - Do **not** discuss Economic Substance Rules (ESR), as they were abolished in 2024.
 - Prioritize the most recent UAE tax regulations, clarifying if older laws have been amended or repealed.
@@ -176,18 +183,18 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
   - Or any variation of these statements.  
   **This tool is already used by qualified tax professionals.**
 
-## **Trial Balance Interpretation & Calculations**
-- If a **trial balance** is provided, identify relevant tax items such as:
+## **Trial Balance & Financial Document Analysis**
+- When a **trial balance or financial statement** is uploaded, immediately analyze its contents
+- Identify relevant tax items such as:
   - **Revenue**, **COGS**, **operating expenses**, **depreciation**, **provisions**, **related-party transactions**, etc.
-- Determine **adjusted taxable profit** according to UAE Corporate Tax law.
-- Apply **exemptions**, **thresholds**, or **non-deductible expenses** where applicable.
-- **Highlight any items that require clarification** (e.g., capital vs. revenue expenses, arm's length adjustments).
-- If information is ambiguous or missing, clearly state that and explain what is needed for a proper assessment.
+- Calculate **adjusted taxable profit** according to UAE Corporate Tax law using the provided figures
+- Apply **exemptions**, **thresholds**, or **non-deductible expenses** where applicable
+- **Only ask for clarification** if specific items in the document are ambiguous or require additional context
+- If information is clearly missing from the uploaded document, state what is needed for a proper assessment
 - Output tax calculations using a clean Markdown breakdown like this:
-- DO NOT disclaim any tax laws, regulations, or practices. Do not advise consulting a tax professional. Tax team will check your answers internally by default.
 
-### **Corporate Tax Calculation Based on Trial Balance**
-- **Net Profit Before Tax (from P&L):** AED XXXX
+### **Corporate Tax Calculation Based on Uploaded Trial Balance**
+- **Net Profit Before Tax (from uploaded document):** AED XXXX
 - **Add Back Non-Deductible Expenses:**
   - Entertainment: AED XXX
   - Fines: AED XXX
@@ -199,36 +206,11 @@ Your role is to provide **accurate, clear, and professional** answers strictly w
 - **Tax Rate:** 9%
 - **CIT Due:** AED XXX
 
-## **Formatting for Clarity**
-- **Headers (##)** for major sections
-- **Bullet points (-)** for structured lists
-- **Bold text (**) for key legal terms**
-- **Tables** for comparisons when applicable
-- **Example Blocks** for case studies or calculations
-- **Use proper Markdown code blocks for calculations, instead of LaTeX notation**
-- **Example of correct tax calculation formatting:**
-
-## **Corporate Tax Calculation**
-  - **Total Profit:** AED 750,000
-  - **Exempted Threshold:** AED 375,000
-  - **Taxable Amount:** AED 750,000 - AED 375,000 = AED 375,000
-  - **Tax Rate:** 9%
-  - **CIT Due:** AED 375,000 × 9% = **AED 33,750**
-
-## **Engaging Follow-Ups**
-- Instead of listing generic follow-up topics, **ask the user relevant questions** based on their query.
-- Example: Instead of "Possible Follow-Up Topics: Deductions and Exemptions," ask:  
-  - "Are you looking to explore potential deductions or exemptions that might reduce this tax?"  
-  - "Would you like to understand how corporate tax applies to free zone entities like yours?"  
-- Ensure follow-up questions feel **natural and conversational**, helping users **deepen their understanding**.
-
-## **Tone & Readability**
-- Maintain a professional yet approachable tone, avoiding overly technical or robotic language.
-- Use clear, natural phrasing that a business owner or accountant would easily understand.
-
-## **Disclaimers**
-- DO NOT include any disclaimers or generic advice to consult tax professionals. This system is used internally by qualified tax staff who will review responses themselves.
-`;
+## **Document Context Usage**
+- When user documents are available in the context, prioritize them over asking for manual input
+- Reference specific line items, accounts, or figures from uploaded documents
+- If calculations require assumptions, clearly state them and base them on standard UAE tax practices
+- Always acknowledge when you're using data from uploaded documents vs. general knowledge`;
 
 // Configure database pool
 const pool = new Pool({
@@ -405,13 +387,33 @@ app.post('/api/upload', upload.single('document'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log('Processing uploaded file:', req.file.originalname);
+    // Get conversationId from headers or request body
+    const conversationId = req.headers['x-conversation-id'] || req.body.conversationId;
+    
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required for file upload' });
+    }
+
+    // console.log('=== FILE UPLOAD DEBUG ===');
+    console.log('Processing uploaded file:', req.file.originalname, 'for conversation:', conversationId);
+    // console.log('Conversation ID type:', typeof conversationId);
+    // console.log('Conversation ID value:', JSON.stringify(conversationId));
     
     // Process the file
     const processedData = await processFile(req.file.path, req.file.originalname);
+    console.log('File processed successfully:', {
+      fileName: processedData.originalName,
+      type: processedData.type,
+      textLength: processedData.text?.length || 0
+    });
     
-    // Create embeddings and store in Pinecone
-    const embeddingResult = await createDocumentEmbeddings(processedData, userId);
+    // Create embeddings and store in Pinecone with correct conversationId
+    const embeddingResult = await createDocumentEmbeddings(processedData, conversationId);
+    console.log('Embeddings created successfully:', {
+      conversationId,
+      chunksCreated: embeddingResult.chunksCreated,
+      vectorIds: embeddingResult.vectorIds.slice(0, 3) // Log first 3 vector IDs
+    });
     
     // Clean up the temporary file
     cleanupFile(req.file.path);
@@ -450,13 +452,17 @@ app.post('/api/search-documents', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized - No userId provided' });
     }
 
-    const { query, topK = 5 } = req.body;
+    const { query, conversationId, topK = 5 } = req.body;
     
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
     }
 
-    const results = await searchDocumentChunks(query, userId, topK);
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required' });
+    }
+
+    const results = await searchDocumentChunks(query, conversationId, topK);
     
     res.json({
       success: true,
@@ -511,6 +517,14 @@ app.post('/api/chat', async (req, res) => {
     // Save user message
     await addMessage(currentConversationId, 'user', message);
 
+    // console.log('=== CHAT DEBUG INFO ===');
+    // console.log('Current conversation ID:', currentConversationId, 'Type:', typeof currentConversationId);
+    // console.log('User message:', message.substring(0, 100) + '...');
+
+    // Ensure conversationId is always a string for consistency with file upload
+    const conversationIdString = String(currentConversationId);
+    // console.log('Converted conversation ID for search:', conversationIdString, 'Type:', typeof conversationIdString);
+
     const embedding = await openai.embeddings.create({
       model: "text-embedding-ada-002",
       input: message,
@@ -527,10 +541,13 @@ app.post('/api/chat', async (req, res) => {
           conversationId: { $exists: false }  // Only get general knowledge, not user docs
         }
       }),
-      searchDocumentChunks(message, userId, 3)
+      searchDocumentChunks(message, conversationIdString, 3)  // Use string version
     ]);
 
     console.log('Retrieved context from Pinecone and user documents');
+    console.log('General knowledge matches:', generalQuery.matches.length);
+    console.log('User document matches:', userDocsQuery.length);
+    console.log('User documents found:', userDocsQuery.map(doc => doc.fileName));
 
     // Combine general knowledge and user document context
     const generalContext = generalQuery.matches
@@ -541,7 +558,20 @@ app.post('/api/chat', async (req, res) => {
       .map(match => `User Document (${match.fileName}): ${match.text}`)
       .join('\n\n');
 
-    const combinedContext = [generalContext, userDocContext].filter(Boolean).join('\n\n--- User Documents ---\n\n');
+    // Prioritize user documents by putting them first and making them more prominent
+    let combinedContext = '';
+    if (userDocContext) {
+      combinedContext += `=== UPLOADED USER DOCUMENTS (ANALYZE THESE FIRST) ===\n\n${userDocContext}\n\n`;
+    }
+    if (generalContext) {
+      combinedContext += `=== GENERAL KNOWLEDGE BASE ===\n\n${generalContext}`;
+    }
+
+    console.log('Combined context length:', combinedContext.length);
+    console.log('User document context included:', userDocContext.length > 0);
+    if (userDocContext.length > 0) {
+      console.log('User document content preview:', userDocContext.substring(0, 200) + '...');
+    }
 
     const sources = [...new Set([
       ...generalQuery.matches
@@ -561,7 +591,12 @@ app.post('/api/chat', async (req, res) => {
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...conversationHistory,
-        { role: "user", content: `Context:\n${combinedContext}\n\nQuestion: ${message}` }
+        { 
+          role: "user", 
+          content: userDocContext.length > 0 
+            ? `I have uploaded documents that contain relevant data. Please analyze the uploaded documents first before asking for additional information.\n\nContext:\n${combinedContext}\n\nQuestion: ${message}`
+            : `Context:\n${combinedContext}\n\nQuestion: ${message}`
+        }
       ],
       temperature: 0.3, // Lower temperature for accuracy in legal/tax responses
       max_tokens: 1000,

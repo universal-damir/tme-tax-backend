@@ -293,6 +293,14 @@ export const createDocumentEmbeddings = async (processedData, conversationId) =>
  */
 export const searchDocumentChunks = async (query, conversationId, topK = 5) => {
   try {
+    // console.log('=== DOCUMENT SEARCH DEBUG ===');
+    // console.log('Searching documents with:', {
+    //   query: query.substring(0, 100) + '...',
+    //   conversationId,
+    //   conversationIdType: typeof conversationId,
+    //   topK
+    // });
+
     // Create embedding for the query
     const embeddingResponse = await openai.embeddings.create({
       model: "text-embedding-ada-002",
@@ -309,6 +317,13 @@ export const searchDocumentChunks = async (query, conversationId, topK = 5) => {
       filter: {
         conversationId: { $eq: conversationId }
       }
+    });
+
+    // Keep minimal logging for monitoring
+    console.log('Document search results:', {
+      totalMatches: searchResponse.matches.length,
+      conversationId,
+      matchingFiles: searchResponse.matches.map(m => m.metadata?.fileName).filter(Boolean)
     });
 
     return searchResponse.matches.map(match => ({
