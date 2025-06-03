@@ -38,13 +38,6 @@ pool.connect((err, client, done) => {
 
 const saltRounds = 10;
 
-const users = [
-  { username: 'tmetaxation', password: '100%TME-25' },
-  { username: 'uwe', password: '100%TME-25' },
-  { username: 'malavika', password: '100%TME-25' },
-  { username: 'dijendra', password: '100%TME-25' }
-];
-
 // Add safe database initialization function
 const initDbSafe = async () => {
   const client = await pool.connect();
@@ -60,20 +53,6 @@ const initDbSafe = async () => {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
-
-    // Check if users table is empty and insert default users
-    const userCount = await client.query('SELECT COUNT(*) FROM users');
-    if (parseInt(userCount.rows[0].count) === 0) {
-      // Insert users with hashed passwords only if table is empty
-      for (const user of users) {
-        const hashedPassword = await bcrypt.hash(user.password, saltRounds);
-        await client.query(
-          'INSERT INTO users (username, password_hash) VALUES ($1, $2)',
-          [user.username, hashedPassword]
-        );
-      }
-      console.log('Default users created');
-    }
 
     // Create conversations table if it doesn't exist
     await client.query(`
@@ -141,15 +120,6 @@ const initDb = async () => {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
-
-    // Insert users with hashed passwords
-    for (const user of users) {
-      const hashedPassword = await bcrypt.hash(user.password, saltRounds);
-      await client.query(
-        'INSERT INTO users (username, password_hash) VALUES ($1, $2)',
-        [user.username, hashedPassword]
-      );
-    }
 
     // Create conversations table
     await client.query(`
