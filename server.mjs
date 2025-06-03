@@ -53,6 +53,19 @@ if (result.error) {
   console.log(`${envFile} file loaded successfully`);
 }
 
+// Environment validation and logging
+console.log('=== ENVIRONMENT VALIDATION ===');
+console.log(`Final NODE_ENV: ${process.env.NODE_ENV}`);
+console.log(`Database Host: ${process.env.PGHOST ? process.env.PGHOST.substring(0, 20) + '...' : 'NOT SET'}`);
+console.log(`Database Port: ${process.env.PGPORT || 'NOT SET'}`);
+console.log(`Environment File Loaded: ${envFile}`);
+console.log(`Expected Environment: ${nodeEnv}`);
+if (process.env.NODE_ENV !== nodeEnv) {
+  console.error('🚨 WARNING: NODE_ENV mismatch detected!');
+  console.error(`Expected: ${nodeEnv}, Actual: ${process.env.NODE_ENV}`);
+}
+console.log('================================');
+
 console.log('Environment variables loaded:', {
   PGUSER: process.env.PGUSER ? '***' : 'not set',
   PGHOST: process.env.PGHOST ? '***' : 'not set', 

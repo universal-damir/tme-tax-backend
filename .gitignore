@@ -1,6 +1,40 @@
+# Dependencies
 node_modules/
+
+# Environment files (contains sensitive data)
 .env
-node_modules/
-.env
-node_modules/
-.env
+.env.*
+.env.local
+.env.development
+.env.production
+
+# Uploads directory
+uploads/
+
+# Log files
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

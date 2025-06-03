@@ -11,18 +11,17 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables - consistent with server.mjs
-if (process.env.NODE_ENV !== 'production') {
-  const envPath = path.resolve(__dirname, '..', '.env');  // Go up one level to root
-  console.log('FileProcessor: Loading .env from:', envPath);
-  const result = dotenv.config({ path: envPath, debug: true });
-  if (result.error) {
-    console.warn('FileProcessor: Error loading .env file in development:', result.error);
-  } else {
-    console.log('FileProcessor: .env file loaded successfully');
-  }
+// Load environment variables based on NODE_ENV - consistent with server.mjs and db.mjs
+const nodeEnv = process.env.NODE_ENV || 'development';
+const envFile = nodeEnv === 'development' ? '.env.development' : '.env';
+const envPath = path.resolve(__dirname, '..', envFile); // Go up one level to root
+
+console.log(`FileProcessor - Loading environment from: ${envFile} (NODE_ENV: ${nodeEnv})`);
+const result = dotenv.config({ path: envPath, debug: true });
+if (result.error) {
+  console.warn(`FileProcessor: Error loading ${envFile} file:`, result.error);
 } else {
-  console.log('FileProcessor: Running in production mode, using environment variables');
+  console.log(`FileProcessor: ${envFile} file loaded successfully`);
 }
 
 // Validate required environment variables

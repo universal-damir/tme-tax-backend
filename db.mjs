@@ -12,6 +12,18 @@ const envPath = path.resolve(process.cwd(), '..', envFile); // Go up one level t
 console.log(`DB Module - Loading environment from: ${envFile} (NODE_ENV: ${nodeEnv})`);
 dotenv.config({ path: envPath });
 
+// Environment validation for database connections
+console.log('=== DATABASE ENVIRONMENT VALIDATION ===');
+console.log(`DB NODE_ENV: ${process.env.NODE_ENV}`);
+console.log(`DB Host: ${process.env.PGHOST ? process.env.PGHOST.substring(0, 20) + '...' : 'NOT SET'}`);
+console.log(`DB Port: ${process.env.PGPORT || 'NOT SET'}`);
+console.log(`DB Environment File: ${envFile}`);
+if (process.env.NODE_ENV !== nodeEnv) {
+  console.error('🚨 DB WARNING: NODE_ENV mismatch detected!');
+  console.error(`Expected: ${nodeEnv}, Actual: ${process.env.NODE_ENV}`);
+}
+console.log('==========================================');
+
 // Validate required environment variables
 const requiredEnvVars = ['PGUSER', 'PGHOST', 'PGDATABASE', 'POSTGRES_PASSWORD', 'PGPORT'];
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);

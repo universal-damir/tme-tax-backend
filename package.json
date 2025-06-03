@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "nodemon server.mjs",
+    "dev": "NODE_ENV=development nodemon server.mjs",
     "process": "node processDocuments.cjs"
   },
   "dependencies": {
