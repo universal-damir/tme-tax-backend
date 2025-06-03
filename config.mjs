@@ -30,10 +30,11 @@ export const dbConfig = {
   host: dbHost,
   port: dbPort,
   database: dbName,
-  ssl: {
-    rejectUnauthorized: false,
+  ssl: isProduction ? {
+    rejectUnauthorized: true,
+    // Railway PostgreSQL uses self-signed certificates, so we need to handle this properly
     checkServerIdentity: () => undefined
-  }
+  } : false
 };
 
 // Other configurations

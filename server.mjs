@@ -30,6 +30,8 @@ import {
 } from './db.mjs';
 import bcrypt from 'bcrypt';
 import pkg from 'pg';
+import jwt from 'jsonwebtoken';
+import cookieParser from 'cookie-parser';
 const { Pool } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -72,6 +74,9 @@ const corsOptions = {
 // Apply CORS middleware first
 app.use(cors(corsOptions));
 
+// Add cookie parser middleware
+app.use(cookieParser());
+
 // Security middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -83,6 +88,12 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.'
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit login attempts
+  message: 'Too many login attempts, please try again later.'
 });
 
 app.use('/api/', limiter);
@@ -111,7 +122,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ttest route to verify CORS
+// Test route to verify CORS
 app.get('/api/test', (req, res) => {
   res.json({ message: 'CORS is working' });
 });
@@ -219,7 +230,8 @@ const pool = new Pool({
   port: process.env.PGPORT,
   database: process.env.PGDATABASE,
   ssl: process.env.NODE_ENV === 'production' ? {
-    rejectUnauthorized: false
+    rejectUnauthorized: false, // Railway uses self-signed certificates
+    checkServerIdentity: () => undefined
   } : false
 });
 
@@ -259,13 +271,33 @@ const initializeDatabase = async () => {
 
 initializeDatabase();
 
-// New endpoints for conversation management
-app.get('/api/conversations', async (req, res) => {
-  try {
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
+// Generate a secure JWT secret if not provided in environment
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn('⚠️  JWT_SECRET not set in environment variables. Using generated secret (sessions will not persist across restarts)');
+}
+
+// Authentication middleware
+const authenticateToken = (req, res, next) => {
+  const token = req.cookies.authToken;
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
     }
+    req.user = user;
+    next();
+  });
+};
+
+// New endpoints for conversation management
+app.get('/api/conversations', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
     console.log('Fetching conversations for user:', userId);
     const conversations = await getConversations(userId);
     res.json(conversations);
@@ -275,13 +307,9 @@ app.get('/api/conversations', async (req, res) => {
   }
 });
 
-app.get('/api/conversations/:id', async (req, res) => {
+app.get('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
-    }
-
+    const userId = req.user.userId;
     const messages = await getConversationMessages(req.params.id, userId);
     res.json(messages);
   } catch (error) {
@@ -293,13 +321,10 @@ app.get('/api/conversations/:id', async (req, res) => {
   }
 });
 
-app.post('/api/conversations', async (req, res) => {
+app.post('/api/conversations', authenticateToken, async (req, res) => {
   try {
     const { title } = req.body;
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const userId = req.user.userId;
     const conversation = await createConversation(userId, title || 'New Conversation');
     res.json(conversation);
   } catch (error) {
@@ -308,13 +333,9 @@ app.post('/api/conversations', async (req, res) => {
   }
 });
 
-app.put('/api/conversations/:id', async (req, res) => {
+app.put('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
-    }
-
+    const userId = req.user.userId;
     const { title } = req.body;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return res.status(400).json({ error: 'Title is required and must be a non-empty string' });
@@ -331,13 +352,9 @@ app.put('/api/conversations/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/conversations/:id', async (req, res) => {
+app.delete('/api/conversations/:id', authenticateToken, async (req, res) => {
   try {
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
-    }
-
+    const userId = req.user.userId;
     await deleteConversation(req.params.id, userId);
     res.json({ success: true });
   } catch (error) {
@@ -349,11 +366,39 @@ app.delete('/api/conversations/:id', async (req, res) => {
   }
 });
 
-// Configure multer for file uploads
+// Enhanced file upload security
+const fileSignatures = {
+  pdf: [0x25, 0x50, 0x44, 0x46], // %PDF
+  xlsx: [0x50, 0x4B, 0x03, 0x04], // ZIP signature (XLSX is ZIP-based)
+  xls: [0xD0, 0xCF, 0x11, 0xE0], // OLE2 signature
+  csv: null // CSV files don't have a consistent signature
+};
+
+const validateFileSignature = (filePath, expectedType) => {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const signature = fileSignatures[expectedType];
+    
+    if (!signature) return true; // Skip validation for CSV
+    
+    for (let i = 0; i < signature.length; i++) {
+      if (buffer[i] !== signature[i]) {
+        return false;
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('File signature validation error:', error);
+    return false;
+  }
+};
+
+// Configure multer for file uploads with enhanced security
 const upload = multer({
   dest: 'uploads/',
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 1 // Only allow single file upload
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
@@ -366,39 +411,72 @@ const upload = multer({
     const allowedExtensions = ['.pdf', '.csv', '.xlsx', '.xls'];
     const fileExtension = path.extname(file.originalname).toLowerCase();
     
-    if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only PDF, CSV, and Excel files are allowed.'), false);
+    // Check file extension
+    if (!allowedExtensions.includes(fileExtension)) {
+      return cb(new Error('Invalid file extension. Only PDF, CSV, and Excel files are allowed.'), false);
     }
+    
+    // Check MIME type
+    if (!allowedTypes.includes(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only PDF, CSV, and Excel files are allowed.'), false);
+    }
+    
+    // Relaxed filename validation - just check for dangerous characters
+    if (/[<>:"|?*\x00-\x1f]/.test(file.originalname)) {
+      return cb(new Error('Invalid filename. File contains dangerous characters.'), false);
+    }
+    
+    cb(null, true);
   }
 });
 
 // File upload endpoint
-app.post('/api/upload', upload.single('document'), async (req, res) => {
+app.post('/api/upload', authenticateToken, upload.single('document'), async (req, res) => {
   try {
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
-    }
+    const userId = req.user.userId;
+    console.log('=== UPLOAD DEBUG START ===');
+    console.log('User ID:', userId);
+    console.log('File received:', req.file ? req.file.originalname : 'No file');
+    console.log('Headers:', req.headers);
 
     if (!req.file) {
+      console.log('ERROR: No file uploaded');
       return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Validate file signature
+    const fileExtension = path.extname(req.file.originalname).toLowerCase();
+    console.log('File extension:', fileExtension);
+    
+    let expectedType;
+    switch (fileExtension) {
+      case '.pdf': expectedType = 'pdf'; break;
+      case '.xlsx': expectedType = 'xlsx'; break;
+      case '.xls': expectedType = 'xls'; break;
+      case '.csv': expectedType = 'csv'; break;
+      default: expectedType = null;
+    }
+
+    if (expectedType && !validateFileSignature(req.file.path, expectedType)) {
+      console.log('ERROR: File signature validation failed');
+      cleanupFile(req.file.path);
+      return res.status(400).json({ error: 'File content does not match the declared file type' });
     }
 
     // Get conversationId from headers or request body
     const conversationId = req.headers['x-conversation-id'] || req.body.conversationId;
+    console.log('Conversation ID:', conversationId);
     
     if (!conversationId) {
+      console.log('ERROR: No conversation ID provided');
+      cleanupFile(req.file.path);
       return res.status(400).json({ error: 'Conversation ID is required for file upload' });
     }
 
-    // console.log('=== FILE UPLOAD DEBUG ===');
     console.log('Processing uploaded file:', req.file.originalname, 'for conversation:', conversationId);
-    // console.log('Conversation ID type:', typeof conversationId);
-    // console.log('Conversation ID value:', JSON.stringify(conversationId));
     
     // Process the file
+    console.log('Starting file processing...');
     const processedData = await processFile(req.file.path, req.file.originalname);
     console.log('File processed successfully:', {
       fileName: processedData.originalName,
@@ -407,6 +485,7 @@ app.post('/api/upload', upload.single('document'), async (req, res) => {
     });
     
     // Create embeddings and store in Pinecone with correct conversationId
+    console.log('Starting embedding creation...');
     const embeddingResult = await createDocumentEmbeddings(processedData, conversationId);
     console.log('Embeddings created successfully:', {
       conversationId,
@@ -417,6 +496,7 @@ app.post('/api/upload', upload.single('document'), async (req, res) => {
     // Clean up the temporary file
     cleanupFile(req.file.path);
     
+    console.log('=== UPLOAD SUCCESS ===');
     res.json({
       success: true,
       document: {
@@ -430,7 +510,9 @@ app.post('/api/upload', upload.single('document'), async (req, res) => {
     });
 
   } catch (error) {
+    console.error('=== UPLOAD ERROR ===');
     console.error('Error processing file upload:', error);
+    console.error('Error stack:', error.stack);
     
     // Clean up file on error
     if (req.file) {
@@ -444,13 +526,9 @@ app.post('/api/upload', upload.single('document'), async (req, res) => {
 });
 
 // Search user documents endpoint
-app.post('/api/search-documents', async (req, res) => {
+app.post('/api/search-documents', authenticateToken, async (req, res) => {
   try {
-    const userId = req.headers.authorization;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized - No userId provided' });
-    }
-
+    const userId = req.user.userId;
     const { query, conversationId, topK = 5 } = req.body;
     
     if (!query) {
@@ -477,10 +555,9 @@ app.post('/api/search-documents', async (req, res) => {
 });
 
 // Update the existing chat endpoint to work with conversations
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', authenticateToken, async (req, res) => {
   console.log('Received chat request');
   
- 
   // CORS headers explicitly in case they're lost
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -498,12 +575,7 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const { message, conversationId, history = [] } = req.body;
-    const userId = req.headers.authorization;
-    
-    if (!userId) {
-      sendSSE({ type: 'error', error: 'Unauthorized' });
-      return res.end();
-    }
+    const userId = req.user.userId;
 
     let currentConversationId = conversationId;
     if (!currentConversationId) {
@@ -675,14 +747,19 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Generate a secure JWT secret if not provided in environment
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
-
-// Update login endpoint
-app.post('/api/login', async (req, res) => {
+// Update login endpoint with secure JWT implementation
+app.post('/api/login', authLimiter, async (req, res) => {
   const { username, password } = req.body;
   
   try {
+    // Input validation
+    if (!username || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Username and password are required' 
+      });
+    }
+
     // Query user from database
     const result = await pool.query(
       'SELECT id, username, password_hash FROM users WHERE username = $1',
@@ -701,6 +778,25 @@ app.post('/api/login', async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
     if (isValidPassword) {
+      // Create JWT token
+      const token = jwt.sign(
+        { 
+          userId: user.id.toString(),
+          username: user.username 
+        }, 
+        JWT_SECRET, 
+        { expiresIn: '24h' }
+      );
+
+      // Set secure httpOnly cookie
+      res.cookie('authToken', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        path: '/'
+      });
+
       res.json({ 
         success: true,
         userId: user.id.toString(),
@@ -720,6 +816,28 @@ app.post('/api/login', async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
+});
+
+// Add logout endpoint
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('authToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/'
+  });
+  res.json({ success: true, message: 'Logged out successfully' });
+});
+
+// Add token verification endpoint
+app.get('/api/verify-token', authenticateToken, (req, res) => {
+  res.json({ 
+    valid: true, 
+    user: { 
+      userId: req.user.userId, 
+      username: req.user.username 
+    } 
+  });
 });
 
 // Configure port for different environments
