@@ -40,16 +40,17 @@ const __dirname = path.dirname(__filename);
 console.log('Current directory:', process.cwd());
 console.log('__dirname:', __dirname);
 
-// Load environment variables only in development
-if (process.env.NODE_ENV !== 'production') {
-  const envPath = path.resolve(process.cwd(), '.env');
-  console.log('Loading .env from:', envPath);
-  const result = dotenv.config({ path: envPath, debug: true });
-  if (result.error) {
-    console.warn('Error loading .env file in development:', result.error);
-  }
+// Load environment variables based on NODE_ENV
+const nodeEnv = process.env.NODE_ENV || 'development';
+const envFile = nodeEnv === 'development' ? '.env.development' : '.env';
+const envPath = path.resolve(process.cwd(), '..', envFile); // Go up one level to root
+
+console.log(`Server - Loading environment from: ${envFile} (NODE_ENV: ${nodeEnv})`);
+const result = dotenv.config({ path: envPath, debug: true });
+if (result.error) {
+  console.warn(`Error loading ${envFile} file:`, result.error);
 } else {
-  console.log('Running in production mode, using environment variables');
+  console.log(`${envFile} file loaded successfully`);
 }
 
 console.log('Environment variables loaded:', {

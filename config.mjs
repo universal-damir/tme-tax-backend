@@ -5,8 +5,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables
-dotenv.config();
+// Load environment variables based on NODE_ENV
+const nodeEnv = process.env.NODE_ENV || 'development';
+const envFile = nodeEnv === 'development' ? '.env.development' : '.env';
+const envPath = path.resolve(process.cwd(), '..', envFile); // Go up one level to root
+
+console.log(`Loading environment from: ${envFile} (NODE_ENV: ${nodeEnv})`);
+dotenv.config({ path: envPath });
 
 // Database configuration
 const isProduction = process.env.NODE_ENV === 'production';

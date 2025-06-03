@@ -1,10 +1,16 @@
 import pkg from 'pg';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
+import path from 'path';
 const { Pool } = pkg;
 
-// Load environment variables
-dotenv.config();
+// Load environment variables based on NODE_ENV
+const nodeEnv = process.env.NODE_ENV || 'development';
+const envFile = nodeEnv === 'development' ? '.env.development' : '.env';
+const envPath = path.resolve(process.cwd(), '..', envFile); // Go up one level to root
+
+console.log(`DB Module - Loading environment from: ${envFile} (NODE_ENV: ${nodeEnv})`);
+dotenv.config({ path: envPath });
 
 // Validate required environment variables
 const requiredEnvVars = ['PGUSER', 'PGHOST', 'PGDATABASE', 'POSTGRES_PASSWORD', 'PGPORT'];
@@ -332,4 +338,4 @@ export {
   updateConversation,
   deleteConversation,
   healthCheck
-}; 
+};
